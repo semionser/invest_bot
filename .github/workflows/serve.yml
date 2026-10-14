@@ -1,0 +1,38 @@
+name: invest-bot
+# One long run answers the menu buttons, sends alerts and the 9:00/22:00 reports.
+# Each run lives ~5h50m; a new one starts every 6 hours. A push restarts it with the new code.
+on:
+  schedule:
+    - cron: "30 */6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: invest-bot
+  cancel-in-progress: true
+jobs:
+  serve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 358
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -q matplotlib==3.9.2
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with: {path: state, key: "state-${{ github.run_id }}", restore-keys: "state-"}
+      - name: Decrypt portfolio
+        env: {PORTFOLIO_KEY: "${{ secrets.PORTFOLIO_KEY }}"}
+        run: openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in portfolio.json.enc -out portfolio.json -pass env:PORTFOLIO_KEY
+      - name: Serve
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID || '882131685' }}
+        run: python bot.py serve
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with: {path: state, key: "state-${{ github.run_id }}-${{ github.run_attempt }}"}
