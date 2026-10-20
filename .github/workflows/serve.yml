@@ -1,9 +1,10 @@
 name: invest-bot
 # One long run answers the menu buttons, sends alerts and the 9:00/22:00 reports.
-# Each run lives ~5h50m; a new one starts every 6 hours. A push restarts it with the new code.
+# Each run lives ~5h50m. A scheduled run waits in the queue behind the current one and starts the moment it ends,
+# so there are no gaps even when GitHub delays cron. A push or a manual run restarts the bot with the new code.
 on:
   schedule:
-    - cron: "30 */6 * * *"
+    - cron: "15 */2 * * *"
   workflow_dispatch:
   push:
     branches: [main]
@@ -11,7 +12,7 @@ permissions:
   contents: read
 concurrency:
   group: invest-bot
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 jobs:
   serve:
     runs-on: ubuntu-latest

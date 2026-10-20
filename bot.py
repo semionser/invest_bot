@@ -12,7 +12,7 @@ MSK = dt.timezone(dt.timedelta(hours=3))
 P = json.load(open("portfolio.json", encoding="utf-8"))
 STATE_FILE = "state/state.json"
 TOKEN, OWNER = os.environ["TG_TOKEN"], str(os.environ["TG_CHAT_ID"])
-MENU = {"keyboard": [["📊 Отчёт", "🖼 Диаграммы"], ["🏆 Лидеры дня", "💼 Позиции"], ["💰 Выплаты", "🎯 Цели"], ["🔔 Уведомления"]],
+MENU = {"keyboard": [["📊 Отчёт", "🖼 Дашборд"], ["🏆 Лидеры дня", "💼 Позиции"], ["💰 Выплаты", "🎯 Цели"], ["🔔 Уведомления"]],
         "resize_keyboard": True, "is_persistent": True}
 
 
@@ -39,15 +39,43 @@ def quotes():
         if last:
             out[m["SECID"]] = dict(name=name, last=last, ch=m.get("LASTTOPREVPRICE") or 0.0, n=n, value=n * last, bond=False)
     js = json.loads(get(ISS.format(m="bonds", b="TQOB")))
-    prev = {s["SECID"]: s.get("PREVPRICE") for s in table(js, "securities")}
+    sec = {s["SECID"]: s for s in table(js, "securities")}
     for m in table(js, "marketdata"):
         code = m["SECID"][2:7]
         if m["SECID"].startswith("SU") and code in P["bonds"]:
-            last = m.get("LAST") or m.get("MARKETPRICE") or prev.get(m["SECID"])
+            s = sec.get(m["SECID"], {})
+            last = m.get("LAST") or m.get("MARKETPRICE") or s.get("PREVPRICE")
             if last:
-                n = P["bonds"][code]
-                out["OFZ" + code] = dict(name="ОФЗ " + code, last=last, ch=m.get("LASTTOPREVPRICE") or 0.0, n=n, value=n * last * 10, bond=True)
+                n, nkd = P["bonds"][code], s.get("ACCRUEDINT") or 0.0
+                # like the broker: price in % of 1000 ₽ plus accrued coupon (НКД)
+                out["OFZ" + code] = dict(name="ОФЗ " + code, last=last, ch=m.get("LASTTOPREVPRICE") or 0.0, n=n,
+                                         value=n * (last * 10 + nkd), bond=True, secid=m["SECID"])
+    for k, x in out.items():
+        c = P.get("cost", {}).get(k)
+        x["pnl"] = x["value"] - c if c else None
+        x["pnl_pct"] = (x["value"] / c - 1) * 100 if c else None
     return out
+
+
+_COUPONS = {}
+
+
+def coupons(q, months=12):
+    """Upcoming OFZ coupons for held bonds from the MOEX schedule: [(date, name, rub)]. Cached per day."""
+    today = dt.datetime.now(MSK).date()
+    if _COUPONS.get("day") != today:
+        rows = []
+        for k, x in q.items():
+            if not x["bond"]:
+                continue
+            url = f"https://iss.moex.com/iss/statistics/engines/stock/markets/bonds/bondization/{x['secid']}.json?iss.meta=off&iss.only=coupons&limit=100"
+            for c in table(json.loads(get(url)), "coupons"):
+                d = dt.date.fromisoformat(c["coupondate"])
+                if c.get("value_rub") or c.get("value"):
+                    rows.append((d, x["name"], x["n"] * float(c.get("value_rub") or c["value"])))
+        _COUPONS.update(day=today, rows=rows)
+    end = today + dt.timedelta(days=months * 31)
+    return [r for r in _COUPONS["rows"] if today <= r[0] <= end]
 
 
 def metals():
@@ -74,6 +102,11 @@ def totals():
 
 
 # ---------- formatting / telegram ----------
+
+def safe(e):
+    """Error text without the bot token and without long payloads (logs of a public repo are public)."""
+    return type(e).__name__ + ": " + str(e).replace(TOKEN, "***")[:120]
+
 
 def rub(x):
     return f"{round(x):,}".replace(",", " ") + " ₽"
@@ -133,45 +166,142 @@ S.setdefault("sent", {})
 
 # ---------- charts ----------
 
-def chart(q, met, history):
+SECTOR = {"YDEX": "IT и рост", "OZON": "IT и рост", "POSI": "IT и рост", "SBER": "Финансы", "MOEX": "Финансы",
+          "LKOH": "Нефть", "TATN": "Нефть", "X5": "Ритейл", "GMKN": "Металлургия"}
+C = dict(ink="#1f2430", mute="#7a8394", grid="#e6e8ee", card="#f4f5f8", up="#12a150", dn="#d9483b", acc="#3b5bdb",
+         cls={"Акции": "#4b4fb8", "ОФЗ": "#2f8fbf", "Металлы": "#d4a017", "Кэш": "#9aa5b1"})
+
+
+def upcoming(q):
+    """Coupons from MOEX plus dividends from the portfolio file, next 12 months."""
+    today = dt.datetime.now(MSK).date()
+    try:
+        rows = coupons(q)
+    except Exception:
+        rows = [(dt.date.fromisoformat(p[0]), p[1], p[2]) for p in P["payouts"] if p[1].startswith("ОФЗ")]
+    rows += [(dt.date.fromisoformat(p[0]), p[1], p[2]) for p in P["payouts"] if not p[1].startswith("ОФЗ")]
+    return sorted(r for r in rows if r[0] >= today)
+
+
+def dashboard(q, met, total, day, history):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
-    plt.rcParams.update({"font.size": 10, "axes.spines.top": False, "axes.spines.right": False})
+    plt.rcParams.update({"font.size": 10, "font.family": "DejaVu Sans", "axes.spines.top": False, "axes.spines.right": False,
+                         "axes.edgecolor": C["grid"], "axes.labelcolor": C["ink"], "xtick.color": C["mute"], "ytick.color": C["ink"],
+                         "text.color": C["ink"], "axes.titlesize": 12, "axes.titleweight": "bold", "axes.titlelocation": "left"})
+    now = dt.datetime.now(MSK)
     rows = list(q.values())
-    classes = {"Акции": sum(x["value"] for x in rows if not x["bond"]), "ОФЗ": sum(x["value"] for x in rows if x["bond"]), "Металлы": met, "Кэш": P["cash"]}
-    big = len(history) >= 2
-    fig = plt.figure(figsize=(9, 8.4 if big else 4.6), dpi=130)
-    gs = fig.add_gridspec(2 if big else 1, 2, width_ratios=[1, 1.35])
-    ax = fig.add_subplot(gs[0, 0])
-    cols = {"Акции": "#4b4fb8", "ОФЗ": "#2f8fbf", "Металлы": "#d4a017", "Кэш": "#9aa5b1"}
+    stocks = [x for x in rows if not x["bond"]]
+    classes = {"Акции": sum(x["value"] for x in stocks), "ОФЗ": sum(x["value"] for x in rows if x["bond"]), "Металлы": met, "Кэш": P["cash"]}
+    pnl_rows = [x for x in rows if x.get("pnl") is not None]
+    pnl = sum(x["pnl"] for x in pnl_rows)
+    pays = upcoming(q)
+    year_income = sum(p[2] for p in pays)
+    hist = history if len(history) >= 2 else []
+
+    fig = plt.figure(figsize=(10, 15.5 if hist else 13), dpi=120, facecolor="white")
+    gs = fig.add_gridspec(5 if hist else 4, 2, height_ratios=[0.5, 1.15, 1.25, 1, 1] if hist else [0.5, 1.15, 1.25, 1],
+                          hspace=0.42, wspace=0.34, left=0.1, right=0.97, top=0.95, bottom=0.04)
+    fig.suptitle(f"Портфель · {now:%d.%m.%Y %H:%M} МСК", x=0.1, ha="left", fontsize=16, fontweight="bold")
+
+    # KPI tiles
+    ax = fig.add_subplot(gs[0, :])
+    ax.axis("off")
+    tiles = [("Капитал", rub(total), None), ("За день", srub(day), day), ("С покупки", srub(pnl) if pnl_rows else "—", pnl if pnl_rows else None),
+             ("Выплаты за 12 мес", rub(year_income), None)]
+    for i, (lbl, val, sign) in enumerate(tiles):
+        x0 = i * 0.25 + 0.005
+        ax.add_patch(plt.Rectangle((x0, 0.02), 0.235, 0.96, transform=ax.transAxes, color=C["card"], zorder=0))
+        ax.text(x0 + 0.015, 0.68, lbl, transform=ax.transAxes, color=C["mute"], fontsize=10)
+        col = C["ink"] if sign is None else (C["up"] if sign >= 0 else C["dn"])
+        ax.text(x0 + 0.015, 0.22, val, transform=ax.transAxes, color=col, fontsize=15, fontweight="bold")
+
+    # structure donut
+    ax = fig.add_subplot(gs[1, 0])
     lab = [k for k, v in classes.items() if v > 0]
     tot = sum(classes.values())
-    ax.pie([classes[k] for k in lab], labels=[f"{k}\n{classes[k] / tot * 100:.0f}%" for k in lab], colors=[cols[k] for k in lab],
-           startangle=90, counterclock=False, wedgeprops={"width": 0.38, "edgecolor": "white"})
-    ax.set_title("Структура", fontweight="bold")
-    ax = fig.add_subplot(gs[0, 1])
-    r = sorted(rows, key=lambda x: x["ch"])
-    ax.barh([x["name"] for x in r], [x["ch"] for x in r], color=["#0e9f6e" if x["ch"] >= 0 else "#d9483b" for x in r])
-    ax.axvline(0, color="#888", lw=0.8)
+    ax.pie([classes[k] for k in lab], colors=[C["cls"][k] for k in lab], startangle=90, counterclock=False,
+           wedgeprops={"width": 0.36, "edgecolor": "white", "linewidth": 2})
+    ax.text(0, 0.08, rub(tot), ha="center", fontsize=12, fontweight="bold")
+    ax.text(0, -0.14, "всего", ha="center", color=C["mute"], fontsize=9)
+    ax.legend([f"{k} · {classes[k] / tot * 100:.0f}%" for k in lab], loc="upper center", bbox_to_anchor=(0.5, 0.02), ncol=2, frameon=False, fontsize=9)
+    ax.set_title("Структура")
+
+    # position weights
+    ax = fig.add_subplot(gs[1, 1])
+    w = sorted(rows, key=lambda x: x["value"])[-10:]
+    ax.barh([x["name"] for x in w], [x["value"] / total * 100 for x in w],
+            color=[C["cls"]["ОФЗ"] if x["bond"] else C["cls"]["Акции"] for x in w])
+    ax.axvline(15, color=C["dn"], ls="--", lw=1)
+    ax.text(15, -0.9, "15% — порог перевеса", color=C["dn"], fontsize=8, ha="right", va="center")
+    ax.set_xlim(0, max(18, max(x["value"] / total * 100 for x in w) + 4))
+    for i, x in enumerate(w):
+        ax.text(x["value"] / total * 100, i, f" {x['value'] / total * 100:.1f}%", va="center", fontsize=8, color=C["mute"])
+    ax.set_xticks([])
+    ax.set_title("Доли позиций, % капитала")
+
+    # day change
+    ax = fig.add_subplot(gs[2, 0])
+    r = sorted(stocks, key=lambda x: x["ch"])
+    ax.barh([x["name"] for x in r], [x["ch"] for x in r], color=[C["up"] if x["ch"] >= 0 else C["dn"] for x in r])
+    ax.axvline(0, color=C["mute"], lw=0.8)
     for i, x in enumerate(r):
         ax.text(x["ch"], i, f" {x['ch']:+.1f}% ", va="center", ha="left" if x["ch"] >= 0 else "right", fontsize=8)
-    ax.set_title("Изменение за день, %", fontweight="bold")
-    ax.margins(x=0.25)
+    ax.margins(x=0.3)
     ax.set_xticks([])
-    if big:
-        ax = fig.add_subplot(gs[1, :])
-        d = [dt.date.fromisoformat(h[0]) for h in history]
-        v = [h[1] for h in history]
-        ax.plot(d, v, color="#2c5ff0", lw=2.2, marker="o", ms=3)
-        ax.fill_between(d, v, min(v) * 0.995, color="#2c5ff0", alpha=0.12)
+    bch = [x["ch"] for x in rows if x["bond"]]
+    ax.set_title("Акции за день, %" + (f"  ·  ОФЗ в среднем {sum(bch) / len(bch):+.1f}%" if bch else ""))
+
+    # result since purchase
+    ax = fig.add_subplot(gs[2, 1])
+    if pnl_rows:
+        r = sorted(pnl_rows, key=lambda x: x["pnl"])
+        ax.barh([x["name"] for x in r], [x["pnl"] for x in r], color=[C["up"] if x["pnl"] >= 0 else C["dn"] for x in r])
+        ax.axvline(0, color=C["mute"], lw=0.8)
+        for i, x in enumerate(r):
+            ax.text(x["pnl"], i, f" {srub(x['pnl'])} ({x['pnl_pct']:+.0f}%) ", va="center", ha="left" if x["pnl"] >= 0 else "right", fontsize=8)
+        ax.margins(x=0.7)
+        ax.set_xticks([])
+    else:
+        ax.axis("off")
+        ax.text(0.5, 0.5, "Нет цен покупки", ha="center", transform=ax.transAxes, color=C["mute"])
+    ax.set_title("Результат с покупки, ₽")
+
+    # capital history
+    row = 3
+    if hist:
+        ax = fig.add_subplot(gs[row, :])
+        d = [dt.date.fromisoformat(h[0]) for h in hist]
+        v = [h[1] for h in hist]
+        ax.plot(d, v, color=C["acc"], lw=2.2, marker="o", ms=3)
+        ax.fill_between(d, v, min(v) * 0.995, color=C["acc"], alpha=0.1)
         ax.annotate(rub(v[-1]), (d[-1], v[-1]), xytext=(-6, 8), textcoords="offset points", ha="right", fontweight="bold")
-        ax.set_title("Капитал", fontweight="bold")
-        ax.grid(axis="y", alpha=0.3)
+        ax.grid(axis="y", color=C["grid"])
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m"))
         ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda y, _: f"{y / 1000:.0f}k"))
-    fig.tight_layout()
+        ax.set_title("Капитал по вечерам")
+        row += 1
+
+    # payouts by month
+    ax = fig.add_subplot(gs[row, :])
+    months = [(now.year + (now.month - 1 + i) // 12, (now.month - 1 + i) % 12 + 1) for i in range(12)]
+    cpn = [sum(p[2] for p in pays if (p[0].year, p[0].month) == m and p[1].startswith("ОФЗ")) for m in months]
+    div = [sum(p[2] for p in pays if (p[0].year, p[0].month) == m and not p[1].startswith("ОФЗ")) for m in months]
+    names = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
+    xl = [names[m - 1] for _, m in months]
+    ax.bar(xl, cpn, color=C["cls"]["ОФЗ"], label="Купоны ОФЗ")
+    ax.bar(xl, div, bottom=cpn, color=C["cls"]["Металлы"], label="Дивиденды")
+    for i, (a, b) in enumerate(zip(cpn, div)):
+        if a + b:
+            ax.text(i, a + b, f"{a + b:.0f}", ha="center", va="bottom", fontsize=8)
+    ax.set_yticks([])
+    ax.set_ylim(0, max(max(a + b for a, b in zip(cpn, div)), 1) * 1.22)
+    ax.spines["left"].set_visible(False)
+    ax.legend(frameon=False, fontsize=9, loc="upper right")
+    ax.set_title(f"Выплаты по месяцам · {rub(year_income)} за 12 мес")
+
     buf = io.BytesIO()
     fig.savefig(buf, format="png")
     plt.close(fig)
@@ -189,6 +319,9 @@ def report(with_chart=True, record=False):
     L = sorted(q.values(), key=lambda x: x["ch"], reverse=True)
     head = "🌅 Утро" if now.hour < 12 else "📊 Портфель" if now.hour < 19 else "🌙 Итоги дня"
     lines = [f"<b>{head} · {now:%d.%m %H:%M}</b>", f"Капитал: <b>{rub(total)}</b>", f"За день: <b>{srub(day)}</b>"]
+    pr = [x for x in q.values() if x.get("pnl") is not None]
+    if pr:
+        lines.append(f"С покупки (акции и ОФЗ): <b>{srub(sum(x['pnl'] for x in pr))}</b>")
     week = [h for h in S["history"] if dt.date.fromisoformat(h[0]) <= now.date() - dt.timedelta(days=7)]
     if week:
         lines.append(f"За неделю: <b>{srub(total - week[-1][1])}</b>")
@@ -201,9 +334,9 @@ def report(with_chart=True, record=False):
     text = "\n".join(lines)
     if with_chart:
         try:
-            return send_photo(chart(q, met, S["history"][-60:]), text, reply_markup=MENU)
+            return send_photo(dashboard(q, met, total, day, S["history"][-90:]), text, reply_markup=MENU)
         except Exception as e:
-            print("chart failed:", e)
+            print("chart failed:", type(e).__name__)
     send(text, reply_markup=MENU)
 
 
@@ -229,6 +362,8 @@ def position(key):
         return send("Нет котировки, попробуй позже.")
     lines = [f"<b>{x['name']}</b>", f"Цена: <b>{price(x)}</b> ({pct(x['ch'])} за день)", f"У тебя: {x['n']} шт. · {rub(x['value'])}",
              f"Доля в капитале: {x['value'] / total * 100:.1f}%".replace(".", ",")]
+    if x.get("pnl") is not None:
+        lines.append(f"С покупки: <b>{srub(x['pnl'])}</b> ({pct(x['pnl_pct'])})")
     for k, side, p, _ in P.get("targets", []):
         if k == key:
             lines.append(f"🎯 Цель {'≤' if side == 'below' else '≥'} {p} ₽ · осталось {pct((p / x['last'] - 1) * 100)}")
@@ -260,14 +395,15 @@ def notify_menu(edit_id=None):
     send(text, reply_markup=kb)
 
 
-ROUTES = {"📊 Отчёт": lambda: report(with_chart=False), "🖼 Диаграммы": report, "🏆 Лидеры дня": leaders, "💼 Позиции": positions,
+ROUTES = {"📊 Отчёт": lambda: report(with_chart=False), "🖼 Дашборд": report, "🖼 Диаграммы": report, "🏆 Лидеры дня": leaders, "💼 Позиции": positions,
           "💰 Выплаты": payouts, "🎯 Цели": targets, "🔔 Уведомления": notify_menu}
 
 
 def handle(u):
     msg = u.get("message") or (u.get("callback_query") or {}).get("message") or {}
-    if str(msg.get("chat", {}).get("id")) != OWNER:
-        return  # not the owner: ignore silently
+    chat = msg.get("chat", {})
+    if str(chat.get("id")) != OWNER or chat.get("type") != "private":
+        return  # not the owner's private chat: ignore silently
     if "callback_query" in u:
         cq = u["callback_query"]
         api("answerCallbackQuery", callback_query_id=cq["id"])
@@ -282,7 +418,10 @@ def handle(u):
             save_state(S)
             return notify_menu(cq["message"]["message_id"])
         return
-    fn = ROUTES.get((msg.get("text") or "").strip())
+    text = (msg.get("text") or "").strip()
+    if text in ("/start", "/menu"):
+        return send("Меню 👇", reply_markup=MENU)
+    fn = ROUTES.get(text)
     if fn:
         return fn()
     send("Выбери действие на клавиатуре 👇", reply_markup=MENU)
@@ -336,11 +475,11 @@ def serve(limit_s):
         try:
             tick()
         except Exception as e:
-            print("tick failed:", e)
+            print("tick failed:", type(e).__name__)
         try:
             res = api("getUpdates", _t=70, offset=offset or 0, timeout=50, allowed_updates=["message", "callback_query"])
         except Exception as e:
-            print("poll failed:", e)
+            print("poll failed:", type(e).__name__)
             time.sleep(5)
             continue
         for u in res.get("result", []):
@@ -348,9 +487,9 @@ def serve(limit_s):
             try:
                 handle(u)
             except Exception as e:
-                print("handle failed:", e)
+                print("handle failed:", type(e).__name__)
                 try:
-                    send("⚠️ Не получилось: " + str(e)[:200])
+                    send("⚠️ Не получилось, попробуй ещё раз через минуту. (" + safe(e) + ")")
                 except Exception:
                     pass
     save_state(S)
