@@ -183,127 +183,204 @@ def upcoming(q):
     return sorted(r for r in rows if r[0] >= today)
 
 
+TARGETS = [("Акции", 60, 75), ("ОФЗ", 10, 15), ("Металлы", 10, 20)]
+
+
 def dashboard(q, met, total, day, history):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
+    from matplotlib.patches import FancyBboxPatch
     plt.rcParams.update({"font.size": 10, "font.family": "DejaVu Sans", "axes.spines.top": False, "axes.spines.right": False,
-                         "axes.edgecolor": C["grid"], "axes.labelcolor": C["ink"], "xtick.color": C["mute"], "ytick.color": C["ink"],
-                         "text.color": C["ink"], "axes.titlesize": 12, "axes.titleweight": "bold", "axes.titlelocation": "left"})
+                         "axes.spines.left": False, "axes.spines.bottom": False, "axes.labelcolor": C["ink"],
+                         "xtick.color": C["mute"], "ytick.color": C["ink"], "text.color": C["ink"], "axes.titlesize": 12.5,
+                         "axes.titleweight": "bold", "axes.titlelocation": "left", "axes.titlepad": 10, "axes.facecolor": "none"})
     now = dt.datetime.now(MSK)
     rows = list(q.values())
     stocks = [x for x in rows if not x["bond"]]
-    classes = {"Акции": sum(x["value"] for x in stocks), "ОФЗ": sum(x["value"] for x in rows if x["bond"]), "Металлы": met, "Кэш": P["cash"]}
+    bonds = [x for x in rows if x["bond"]]
+    classes = {"Акции": sum(x["value"] for x in stocks), "ОФЗ": sum(x["value"] for x in bonds), "Металлы": met, "Кэш": P["cash"]}
+    tot = sum(classes.values()) or 1
     pnl_rows = [x for x in rows if x.get("pnl") is not None]
     pnl = sum(x["pnl"] for x in pnl_rows)
+    cost = sum(x["value"] - x["pnl"] for x in pnl_rows)
     pays = upcoming(q)
     year_income = sum(p[2] for p in pays)
     hist = history if len(history) >= 2 else []
+    BG = "#f6f7fb"
 
-    fig = plt.figure(figsize=(10, 15.5 if hist else 13), dpi=120, facecolor="white")
-    gs = fig.add_gridspec(5 if hist else 4, 2, height_ratios=[0.5, 1.15, 1.25, 1, 1] if hist else [0.5, 1.15, 1.25, 1],
-                          hspace=0.42, wspace=0.34, left=0.1, right=0.97, top=0.95, bottom=0.04)
-    fig.suptitle(f"Портфель · {now:%d.%m.%Y %H:%M} МСК", x=0.1, ha="left", fontsize=16, fontweight="bold")
+    cards = []
+
+    def card(ax, col=None):
+        """Remember a chart to get a white card behind it: col 0/1 = half width, None = full width."""
+        cards.append((ax, col))
+
+    n_rows = 6 if hist else 5
+    ratios = [0.4, 1.2, 1.45, 0.95, 0.95, 0.95][:n_rows] if hist else [0.4, 1.2, 1.45, 0.95, 0.95]
+    fig = plt.figure(figsize=(10, 4.1 * sum(ratios)), dpi=130, facecolor=BG)
+    gs = fig.add_gridspec(n_rows, 2, height_ratios=ratios, hspace=0.6, wspace=0.62, left=0.15, right=0.95, top=0.9, bottom=0.035)
+
+    # header band
+    fig.patches.append(FancyBboxPatch((0.03, 0.915), 0.94, 0.07, boxstyle="round,pad=0,rounding_size=0.015", transform=fig.transFigure,
+                                      facecolor=C["acc"], edgecolor="none", zorder=-1))
+    fig.text(0.055, 0.962, "Портфель", color="white", fontsize=20, fontweight="bold", va="center")
+    fig.text(0.055, 0.932, f"{now:%d.%m.%Y · %H:%M} МСК", color="#dfe4ff", fontsize=10.5, va="center")
+    fig.text(0.945, 0.962, rub(total), color="white", fontsize=22, fontweight="bold", va="center", ha="right")
+    fig.text(0.945, 0.932, f"{srub(day)} за день · {srub(pnl)} с покупки" if pnl_rows else f"{srub(day)} за день",
+             color="#dfe4ff", fontsize=10.5, va="center", ha="right")
 
     # KPI tiles
     ax = fig.add_subplot(gs[0, :])
     ax.axis("off")
-    tiles = [("Капитал", rub(total), None), ("За день", srub(day), day), ("С покупки", srub(pnl) if pnl_rows else "—", pnl if pnl_rows else None),
-             ("Выплаты за 12 мес", rub(year_income), None)]
-    for i, (lbl, val, sign) in enumerate(tiles):
-        x0 = i * 0.25 + 0.005
-        ax.add_patch(plt.Rectangle((x0, 0.02), 0.235, 0.96, transform=ax.transAxes, color=C["card"], zorder=0))
-        ax.text(x0 + 0.015, 0.68, lbl, transform=ax.transAxes, color=C["mute"], fontsize=10)
+    b = ax.get_position()
+    kh = 1.05 / fig.get_figheight()
+    ax.set_position([0.03, 0.902 - kh, 0.94, kh])
+    tiles = [("За день", srub(day), pct(day / max(total - day, 1) * 100), day),
+             ("С покупки", srub(pnl) if pnl_rows else "—", pct(pnl / cost * 100) if cost else "", pnl if pnl_rows else None),
+             ("Кэш на счёте", rub(P["cash"]), "к следующей покупке", None),
+             ("Выплаты за 12 мес", rub(year_income), f"≈{rub(year_income / 12)} в месяц", None)]
+    for i, (lbl, val, sub, sign) in enumerate(tiles):
+        x0 = i * 0.25 + 0.006
+        ax.add_patch(FancyBboxPatch((x0, 0.0), 0.236, 1.0, boxstyle="round,pad=0,rounding_size=0.06", transform=ax.transAxes,
+                                    facecolor="white", edgecolor="#e4e7ef", lw=1, mutation_aspect=4))
         col = C["ink"] if sign is None else (C["up"] if sign >= 0 else C["dn"])
-        ax.text(x0 + 0.015, 0.22, val, transform=ax.transAxes, color=col, fontsize=15, fontweight="bold")
+        if sign is not None:
+            ax.add_patch(plt.Rectangle((x0 + 0.012, 0.18), 0.006, 0.64, transform=ax.transAxes, color=col))
+        ax.text(x0 + 0.03, 0.74, lbl, transform=ax.transAxes, color=C["mute"], fontsize=9.5)
+        ax.text(x0 + 0.03, 0.42, val, transform=ax.transAxes, color=col, fontsize=15, fontweight="bold", va="center")
+        ax.text(x0 + 0.03, 0.14, sub, transform=ax.transAxes, color=C["mute"] if sign is None else col, fontsize=8.5)
 
     # structure donut
     ax = fig.add_subplot(gs[1, 0])
     lab = [k for k, v in classes.items() if v > 0]
-    tot = sum(classes.values())
     ax.pie([classes[k] for k in lab], colors=[C["cls"][k] for k in lab], startangle=90, counterclock=False,
-           wedgeprops={"width": 0.36, "edgecolor": "white", "linewidth": 2})
-    ax.text(0, 0.08, rub(tot), ha="center", fontsize=12, fontweight="bold")
-    ax.text(0, -0.14, "всего", ha="center", color=C["mute"], fontsize=9)
-    ax.legend([f"{k} · {classes[k] / tot * 100:.0f}%" for k in lab], loc="upper center", bbox_to_anchor=(0.5, 0.02), ncol=2, frameon=False, fontsize=9)
+           wedgeprops={"width": 0.3, "edgecolor": "white", "linewidth": 2.5}, radius=1.0)
+    ax.text(0, 0.1, rub(tot), ha="center", fontsize=13, fontweight="bold")
+    ax.text(0, -0.15, "всего", ha="center", color=C["mute"], fontsize=9)
+    ax.legend([f"{k}  {classes[k] / tot * 100:.0f}%" for k in lab], loc="upper center", bbox_to_anchor=(0.5, 0.02), frameon=False,
+              fontsize=9.5, handlelength=0.9, handleheight=0.9, ncol=2)
     ax.set_title("Структура")
+    card(ax, 0)
 
-    # position weights
+    # shares vs target zones
     ax = fig.add_subplot(gs[1, 1])
-    w = sorted(rows, key=lambda x: x["value"])[-10:]
-    ax.barh([x["name"] for x in w], [x["value"] / total * 100 for x in w],
-            color=[C["cls"]["ОФЗ"] if x["bond"] else C["cls"]["Акции"] for x in w])
-    ax.axvline(15, color=C["dn"], ls="--", lw=1)
-    ax.text(15, -0.9, "15% — порог перевеса", color=C["dn"], fontsize=8, ha="right", va="center")
-    ax.set_xlim(0, max(18, max(x["value"] / total * 100 for x in w) + 4))
-    for i, x in enumerate(w):
-        ax.text(x["value"] / total * 100, i, f" {x['value'] / total * 100:.1f}%", va="center", fontsize=8, color=C["mute"])
+    for i, (k, lo, hi) in enumerate(TARGETS[::-1]):
+        share = classes[k] / tot * 100
+        ok = lo <= share <= hi
+        ax.barh(i, 100, color=C["card"], height=0.5)
+        ax.barh(i, hi - lo, left=lo, color="#d7f2e1", height=0.5)
+        ax.barh(i, share, color=C["cls"][k], height=0.22)
+        ax.text(0, i + 0.36, f"сейчас {share:.0f}%", fontsize=9.5, fontweight="bold",
+                color=C["ink"] if ok else C["dn"])
+        ax.text(99, i + 0.36, f"цель {lo}–{hi}%", ha="right", fontsize=8.5, color=C["up"] if ok else C["mute"])
+    ax.set_yticks(range(len(TARGETS)), [t[0] for t in TARGETS[::-1]])
+    ax.tick_params(length=0)
+    ax.set_xlim(0, 100)
     ax.set_xticks([])
-    ax.set_title("Доли позиций, % капитала")
+    ax.set_title("Доли против цели", pad=16)
+    card(ax, 1)
 
-    # day change
+    # result since purchase, every position
     ax = fig.add_subplot(gs[2, 0])
-    r = sorted(stocks, key=lambda x: x["ch"])
-    ax.barh([x["name"] for x in r], [x["ch"] for x in r], color=[C["up"] if x["ch"] >= 0 else C["dn"] for x in r])
-    ax.axvline(0, color=C["mute"], lw=0.8)
-    for i, x in enumerate(r):
-        ax.text(x["ch"], i, f" {x['ch']:+.1f}% ", va="center", ha="left" if x["ch"] >= 0 else "right", fontsize=8)
-    ax.margins(x=0.3)
-    ax.set_xticks([])
-    bch = [x["ch"] for x in rows if x["bond"]]
-    ax.set_title("Акции за день, %" + (f"  ·  ОФЗ в среднем {sum(bch) / len(bch):+.1f}%" if bch else ""))
-
-    # result since purchase
-    ax = fig.add_subplot(gs[2, 1])
     if pnl_rows:
-        r = sorted(pnl_rows, key=lambda x: x["pnl"])
-        ax.barh([x["name"] for x in r], [x["pnl"] for x in r], color=[C["up"] if x["pnl"] >= 0 else C["dn"] for x in r])
+        r = sorted(pnl_rows, key=lambda x: x["pnl_pct"])
+        ax.barh([x["name"] for x in r], [x["pnl_pct"] for x in r], color=[C["up"] if x["pnl"] >= 0 else C["dn"] for x in r], height=0.62)
         ax.axvline(0, color=C["mute"], lw=0.8)
         for i, x in enumerate(r):
-            ax.text(x["pnl"], i, f" {srub(x['pnl'])} ({x['pnl_pct']:+.0f}%) ", va="center", ha="left" if x["pnl"] >= 0 else "right", fontsize=8)
-        ax.margins(x=0.7)
+            ax.text(x["pnl_pct"], i, f" {x['pnl_pct']:+.1f}% · {srub(x['pnl'])} ".replace(".", ","), va="center",
+                    ha="left" if x["pnl"] >= 0 else "right", fontsize=7.5, color=C["mute"])
+        lo, hi = min(min(x["pnl_pct"] for x in r), 0), max(max(x["pnl_pct"] for x in r), 0)
+        span = (hi - lo) or 1
+        ax.set_xlim(lo - span * (0.9 if lo < 0 else 0.02), hi + span * 0.6)
+        ax.tick_params(axis="y", labelsize=8.5, length=0)
         ax.set_xticks([])
     else:
         ax.axis("off")
         ax.text(0.5, 0.5, "Нет цен покупки", ha="center", transform=ax.transAxes, color=C["mute"])
-    ax.set_title("Результат с покупки, ₽")
+    ax.set_title("Результат с покупки")
+    card(ax, 0)
 
-    # capital history
-    row = 3
+    # position weights, colored by asset class, with the 15% overweight line
+    ax = fig.add_subplot(gs[2, 1])
+    w = sorted(rows, key=lambda x: x["value"])[-12:]
+    ax.barh([x["name"] for x in w], [x["value"] / total * 100 for x in w], height=0.62,
+            color=[C["cls"]["ОФЗ"] if x["bond"] else C["cls"]["Акции"] for x in w])
+    ax.axvline(15, color=C["dn"], ls=(0, (3, 3)), lw=1)
+    ax.text(15, len(w) - 0.2, "перевес 15% ", color=C["dn"], fontsize=8, va="bottom", ha="right")
+    ax.set_xlim(0, max(18, max(x["value"] / total * 100 for x in w) + 5))
+    for i, x in enumerate(w):
+        ax.text(x["value"] / total * 100, i, f" {x['value'] / total * 100:.1f}%".replace(".", ","), va="center", fontsize=8, color=C["mute"])
+    ax.tick_params(axis="y", labelsize=8.5, length=0)
+    ax.set_xticks([])
+    ax.set_title("Крупнейшие позиции, %")
+    card(ax, 1)
+
+    # day change for shares
+    ax = fig.add_subplot(gs[3, :])
+    r = sorted(stocks, key=lambda x: x["ch"], reverse=True)
+    ax.bar([x["name"] for x in r], [x["ch"] for x in r], color=[C["up"] if x["ch"] >= 0 else C["dn"] for x in r], width=0.6)
+    ax.axhline(0, color=C["mute"], lw=0.8)
+    for i, x in enumerate(r):
+        ax.text(i, x["ch"], f"{x['ch']:+.1f}%".replace(".", ","), ha="center", va="bottom" if x["ch"] >= 0 else "top", fontsize=8.5,
+                fontweight="bold", color=C["up"] if x["ch"] >= 0 else C["dn"])
+    lim = max(1.0, max(abs(x["ch"]) for x in r) if r else 1) * 1.35
+    ax.set_ylim(-lim, lim)
+    ax.set_yticks([])
+    ax.tick_params(axis="x", labelsize=9, length=0)
+    bch = [x["ch"] for x in bonds]
+    ax.set_title("Акции за день" + (f"   ·   ОФЗ в среднем {sum(bch) / len(bch):+.1f}%".replace(".", ",") if bch else ""))
+    card(ax)
+
+    row = 4
     if hist:
         ax = fig.add_subplot(gs[row, :])
         d = [dt.date.fromisoformat(h[0]) for h in hist]
         v = [h[1] for h in hist]
-        ax.plot(d, v, color=C["acc"], lw=2.2, marker="o", ms=3)
-        ax.fill_between(d, v, min(v) * 0.995, color=C["acc"], alpha=0.1)
-        ax.annotate(rub(v[-1]), (d[-1], v[-1]), xytext=(-6, 8), textcoords="offset points", ha="right", fontweight="bold")
+        ax.plot(d, v, color=C["acc"], lw=2.4)
+        ax.scatter(d[-1:], v[-1:], color=C["acc"], s=36, zorder=3)
+        ax.fill_between(d, v, min(v) * 0.995, color=C["acc"], alpha=0.12)
+        ax.annotate(rub(v[-1]), (d[-1], v[-1]), xytext=(-8, 10), textcoords="offset points", ha="right", fontweight="bold")
+        ch = v[-1] - v[0]
         ax.grid(axis="y", color=C["grid"])
+        ax.tick_params(length=0)
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m"))
         ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda y, _: f"{y / 1000:.0f}k"))
-        ax.set_title("Капитал по вечерам")
+        ax.set_title(f"Капитал по вечерам   ·   {srub(ch)} с {d[0]:%d.%m}")
+        card(ax)
         row += 1
 
-    # payouts by month
     ax = fig.add_subplot(gs[row, :])
     months = [(now.year + (now.month - 1 + i) // 12, (now.month - 1 + i) % 12 + 1) for i in range(12)]
     cpn = [sum(p[2] for p in pays if (p[0].year, p[0].month) == m and p[1].startswith("ОФЗ")) for m in months]
     div = [sum(p[2] for p in pays if (p[0].year, p[0].month) == m and not p[1].startswith("ОФЗ")) for m in months]
     names = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
     xl = [names[m - 1] for _, m in months]
-    ax.bar(xl, cpn, color=C["cls"]["ОФЗ"], label="Купоны ОФЗ")
-    ax.bar(xl, div, bottom=cpn, color=C["cls"]["Металлы"], label="Дивиденды")
+    ax.bar(xl, cpn, color=C["cls"]["ОФЗ"], label="Купоны ОФЗ", width=0.62)
+    ax.bar(xl, div, bottom=cpn, color=C["cls"]["Металлы"], label="Дивиденды", width=0.62)
     for i, (a, b) in enumerate(zip(cpn, div)):
         if a + b:
-            ax.text(i, a + b, f"{a + b:.0f}", ha="center", va="bottom", fontsize=8)
+            ax.text(i, a + b, f"{a + b:.0f}", ha="center", va="bottom", fontsize=8.5, fontweight="bold")
     ax.set_yticks([])
-    ax.set_ylim(0, max(max(a + b for a, b in zip(cpn, div)), 1) * 1.22)
-    ax.spines["left"].set_visible(False)
-    ax.legend(frameon=False, fontsize=9, loc="upper right")
-    ax.set_title(f"Выплаты по месяцам · {rub(year_income)} за 12 мес")
+    ax.tick_params(axis="x", length=0)
+    ax.set_ylim(0, max(max(a + b for a, b in zip(cpn, div)), 1) * 1.25)
+    ax.legend(frameon=False, fontsize=9, loc="upper right", ncol=2)
+    ax.set_title(f"Выплаты по месяцам   ·   {rub(year_income)} за 12 мес")
+    card(ax)
 
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    inv = fig.transFigure.inverted()
+    for a, col in cards:
+        bb = a.get_tightbbox(r).transformed(inv)
+        x0, x1 = {0: (0.03, 0.49), 1: (0.51, 0.97)}.get(col, (0.03, 0.97))
+        py = 0.006
+        fig.patches.append(FancyBboxPatch((x0, bb.y0 - py), x1 - x0, bb.height + 2 * py,
+                                          boxstyle="round,pad=0,rounding_size=0.01", transform=fig.transFigure,
+                                          facecolor="white", edgecolor="#e4e7ef", lw=1, zorder=-1))
+    fig.text(0.5, 0.008, "Не инвестиционная рекомендация · цены Мосбиржи и ЦБ", ha="center", fontsize=8, color=C["mute"])
     buf = io.BytesIO()
-    fig.savefig(buf, format="png")
+    fig.savefig(buf, format="png", facecolor=BG)
     plt.close(fig)
     return buf.getvalue()
 
