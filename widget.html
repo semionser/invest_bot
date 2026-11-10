@@ -3,7 +3,7 @@
 body{font:11px -apple-system,system-ui,sans-serif;color:#1c1f26;background:#fff}
 body.dk{color:#eef0f4;background:#17191f}
 #w{display:flex;gap:6px;padding:6px}
-.cl{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.cl{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}.cl>.c:last-child{flex:1;display:flex;flex-direction:column}.sp{flex:1}
 .c{background:#f4f5f8;border-radius:10px;padding:8px}
 .dk .c{background:#23262e}
 .l{font-size:9px;color:#8a919e}
@@ -14,7 +14,7 @@ body.dk{color:#eef0f4;background:#17191f}
 .t{font-size:10px;font-weight:700}
 .tl{display:flex;gap:4px}.tl .c{flex:1;padding:6px}
 .tl b{display:block;font-size:12px}.tl .c{border-top:3px solid}
-.r{display:flex;align-items:center;font-size:9.5px;line-height:16px;border-radius:5px}
+.r{display:flex;align-items:center;font-size:10px;line-height:20px;border-radius:5px;padding:0 2px}
 .r.on{background:#e4e9f7}.dk .r.on{background:#323849}
 .r span{text-align:right;width:36px}.r span:first-child{flex:1;text-align:left;width:auto}
 .p{display:inline-block;padding:0 4px;border-radius:6px;font-size:8.5px;font-weight:600;line-height:13px}
@@ -27,13 +27,14 @@ body.dk{color:#eef0f4;background:#17191f}
 .ch{font-size:8.5px;padding:1px 6px;border-radius:7px;color:#8a919e}
 .ch.on{background:#3b6fd822;color:#3b6fd8;font-weight:600}
 .ax{display:flex;justify-content:space-between;font-size:7.5px;color:#8a919e}
-.bars{display:flex;align-items:flex-end;gap:2px;height:58px;margin-top:4px}
+.bars{display:flex;align-items:flex-end;gap:2px;height:96px;margin-top:8px}
 .bars div{flex:1;background:#d4d8e0;border-radius:2px 2px 0 0}
 .dk .bars div{background:#3a3f4c}
 .bars .on{background:#3b6fd8}
 .gl{height:5px;background:#e3e6ec;border-radius:3px;margin:4px 0 2px}
 .dk .gl{background:#343844}
 .gl i{display:block;height:5px;border-radius:3px;background:#1a9a4b}
+.ft{display:flex;justify-content:space-between;border-top:1px solid #e1e4ea;padding-top:5px;margin-top:4px;font-size:9.5px}.dk .ft{border-color:#343844}
 </style>
 <div id="w"></div>
 <script>
@@ -63,14 +64,14 @@ c=E('div','c',null,L);var hs=D.h||[],h2=E('div','hb',null,c);E('span','t','Ка�
 if(R==0&&hs.length>8)hs=hs.slice(-8);
 if(hs.length>1){var v=hs.map(function(x){return x[1]}),mn=Math.min.apply(0,v),mx=Math.max.apply(0,v),g=mx-mn||1,n=v.length,P=v.map(function(y,i){return(i*100/(n-1)).toFixed(1)+','+(54-(y-mn)/g*48).toFixed(1)});
 var ch=D.v-hs[0][1]*100;E('div','l '+cl(ch),sr(ch)+' с '+dd(hs[0][0]),c);
-var s='<svg width="100%" height="60" viewBox="0 0 100 60" preserveAspectRatio="none"><polygon points="0,60 '+P.join(' ')+' 100,60" fill="#3b6fd8" fill-opacity=".14"/><polyline points="'+P.join(' ')+'" fill="none" stroke="#3b6fd8" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>';
-var g2=E('div','',null,c);g2.innerHTML=s;var ax=E('div','ax',null,c);E('span','',dd(hs[0][0]),ax);E('span','',dd(hs[n-1][0]),ax)}
+var s='<svg width="100%" height="84" viewBox="0 0 100 60" preserveAspectRatio="none"><polygon points="0,60 '+P.join(' ')+' 100,60" fill="#3b6fd8" fill-opacity=".14"/><polyline points="'+P.join(' ')+'" fill="none" stroke="#3b6fd8" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>';
+E('div','sp',null,c);var g2=E('div','',null,c);g2.innerHTML=s;var ax=E('div','ax',null,c);E('span','',dd(hs[0][0]),ax);E('span','',dd(hs[n-1][0]),ax)}
 c=E('div','c',null,Rt);var sg=E('div','sg',null,c);['Акции','ОФЗ','Выплаты'].forEach(function(n,i){var b=E('div',S==i?'on':'',n,sg);tap(b,function(){S=i;render()})});
-if(S<2){D.s.forEach(function(r,i){if(r[4]!=S)return;var x=E('div','r'+(F==i?' on':''),null,c);E('span','',r[0],x);E('span','mu',k(r[1]),x);var z=E('span','',null,x);z.style.width='44px';S?E('span',cl(r[3]),pc(r[3]),z):pill(r[2],z);tap(x,function(){F=F==i?-1:i;render()})});E('div','l','нажми на бумагу — подробности слева',c)}
+if(S<2){D.s.forEach(function(r,i){if(r[4]!=S)return;var x=E('div','r'+(F==i?' on':''),null,c);E('span','',r[0],x);E('span','mu',k(r[1]),x);var z=E('span','',null,x);z.style.width='44px';S?E('span',cl(r[3]),pc(r[3]),z):pill(r[2],z);tap(x,function(){F=F==i?-1:i;render()})});E('div','sp',null,c);var dy=0,vv=0;D.s.forEach(function(r){if(r[4]==S){vv+=r[1];dy+=r[1]-r[1]/(1+r[2]/100)}});var f=E('div','ft',null,c);E('b','',(S?'Все ОФЗ ':'Все акции ')+k(vv),f);E('span',cl(dy),sr(dy),f);E('div','l',F<0?'тап по бумаге — детали слева':'тап ещё раз — назад',c)}
 else{var m=D.m||[],y=m.slice(1).reduce(function(a,b){return a+b},0),mx2=Math.max.apply(0,m.slice(1).concat([1]));hdr(c,'≈'+rb(y/12)+' в мес',null);
 var gl=E('div','gl',null,c),gi=E('i',null,null,gl);gi.style.width=Math.min(y/12/100,100)+'%';E('div','l','цель 10 000 ₽/мес · '+Math.round(y/12/100)+'%',c);
 var bs=E('div','bars',null,c);m.slice(1).forEach(function(v,i){var b=E('div',i==0?'on':'',null,bs);b.style.height=Math.max(v/mx2*100,3)+'%'});
-var ax2=E('div','ax',null,c);for(var i=0;i<12;i++){var a=E('span','',i%3?'':MN[(m[0]-1+i)%12],ax2);a.style.flex='1'}E('div','l','за 12 мес '+rb(y),c)}
+var ax2=E('div','ax',null,c);for(var i=0;i<12;i++){var a=E('span','',i%3?'':MN[(m[0]-1+i)%12],ax2);a.style.flex='1'}E('div','sp',null,c);var f2=E('div','ft',null,c);E('span','mu','за 12 месяцев',f2);E('b','',rb(y),f2);E('div','l','в этом месяце '+rb(m[1]),c)}
 }
 load();render();
 if(W){W.onEvent('chatDataChanged',function(){load();F=-1;render()});W.onEvent('themeChanged',render);W.ready&&W.ready()}
