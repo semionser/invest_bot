@@ -56,9 +56,10 @@ document.body.className=W&&W.colorScheme=='dark'?'dk':'';
 if(!D){E('div','mu','Нет данных. Нажми «📱 Живой дашборд» в меню.',w);return}
 var L=E('div','cl',null,w),Rt=E('div','cl',null,w),c,tot=D.v||1;
 c=E('div','c',null,L);
-if(F<0){var h=E('div','hb',null,c);E('span','l','Капитал',h);E('span','l',D.t,h);E('div','big',rb(D.v),c);E('div','b '+cl(D.d),sr(D.d)+' за день',c);E('div','l','с покупки '+sr(D.p)+' · кэш '+rb(D.c),c)}
+if(F==-1){var h=E('div','hb',null,c);E('span','l','Капитал',h);E('span','l',D.t,h);E('div','big',rb(D.v),c);E('div','b '+cl(D.d),sr(D.d)+' за день',c);E('div','l','с покупки '+sr(D.p)+' · кэш '+rb(D.c),c)}
+else if(F==-2){var h=E('div','hb',null,c);E('span','l','Металлы · цена ЦБ',h);E('span','l','✕',h);E('div','big',rb(D.a[2]),c);(D.g||[]).forEach(function(g,i){var ch=g[2]?(g[1]/g[2]-1)*100:0,x=E('div','hb',null,c);x.style.marginTop='5px';E('b','',(i?'Серебро ':'Золото ')+g[0]+' г',x);E('b','',rb(g[0]*g[1]),x);var y=E('div','hb',null,c);E('span','l',(g[1]<1000?g[1].toFixed(2).replace('.',','):rb(g[1]).replace(' ₽',''))+' ₽ за грамм',y);pill(ch,y)});tap(c,function(){F=-1;render()})}
 else{var r=D.s[F],h=E('div','hb',null,c);E('span','l',r[4]?'ОФЗ':'Акция',h);E('span','l','✕',h);E('div','big',(r[4]?'ОФЗ ':'')+r[0],c);var q=E('div','b',rb(r[1])+' · ',c);E('span',cl(r[2]),pc(r[2])+' сегодня',q);E('div','l','с покупки '+pc(r[3])+' · доля '+(r[1]/tot*100).toFixed(1).replace('.',',')+'%',c);tap(c,function(){F=-1;render()})}
-var tl=E('div','tl',null,L);[['Акции',0],['ОФЗ',1],['Металлы',2]].forEach(function(x){var t=E('div','c',null,tl);t.style.borderTopColor=COL[x[1]];E('div','l',x[0],t);E('b','',k(D.a[x[1]]),t);E('div','l',Math.round(D.a[x[1]]/tot*100)+'%',t)});
+var tl=E('div','tl',null,L);[['Акции',0],['ОФЗ',1],['Металлы',2]].forEach(function(x){var t=E('div','c',null,tl);t.style.borderTopColor=COL[x[1]];tap(t,function(){if(x[1]==2)F=F==-2?-1:-2;else{S=x[1];F=-1}render()});E('div','l',x[0],t);E('b','',k(D.a[x[1]]),t);E('div','l',Math.round(D.a[x[1]]/tot*100)+'%',t)});
 c=E('div','c',null,L);var hs=D.h||[],h2=E('div','hb',null,c);E('span','t','Капитал',h2);var cs=E('span','',null,h2);
 ['мес','всё'].forEach(function(n,i){var b=E('span','ch'+(R==i?' on':''),n,cs);tap(b,function(){R=i;render()})});
 if(R==0&&hs.length>8)hs=hs.slice(-8);

@@ -86,8 +86,12 @@ def metals():
     for rec in ET.fromstring(get("https://www.cbr.ru/scripts/xml_metall.asp?" + q)).findall("Record"):
         name = {"1": "gold", "2": "silver"}.get(rec.get("Code"))
         if name:
-            res[name] = float(rec.find("Buy").text.replace(",", "."))
-    return res
+            res.setdefault(name, []).append(float(rec.find("Buy").text.replace(",", ".")))
+    METALS.update({k: v[-2:] for k, v in res.items()})  # previous and latest CBR price, for the widget
+    return {k: v[-1] for k, v in res.items()}
+
+
+METALS = {}
 
 
 def totals():
@@ -414,7 +418,8 @@ def widget_data(q, met, total, day):
          "s": [[(x["name"][4:] if x["bond"] else x["name"])[:9], round(x["value"]), round(x["ch"], 1),
                 None if x.get("pnl_pct") is None else round(x["pnl_pct"], 1), int(x["bond"])] for x in rows],
          "h": [[int(h[0][8:10]) * 100 + int(h[0][5:7]), round(h[1] / 100)] for h in hist[-24:]],
-         "m": [today.month] + [round(v) for v in months]}
+         "m": [today.month] + [round(v) for v in months],
+         "g": [[P["metals"].get(k, 0), round(METALS[k][-1], 2), round(METALS[k][0], 2)] for k in ("gold", "silver") if k in METALS]}
     dump = lambda: json.dumps(d, ensure_ascii=False, separators=(",", ":"))
     s = dump()
     while len(s.encode()) > 1024 and len(d["h"]) > 8:
