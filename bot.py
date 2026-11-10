@@ -171,8 +171,6 @@ S.setdefault("sent", {})
 
 # ---------- charts ----------
 
-SECTOR = {"YDEX": "IT и рост", "OZON": "IT и рост", "POSI": "IT и рост", "SBER": "Финансы", "MOEX": "Финансы",
-          "LKOH": "Нефть", "TATN": "Нефть", "X5": "Ритейл", "GMKN": "Металлургия"}
 C = dict(ink="#1f2430", mute="#7a8394", grid="#e6e8ee", card="#f4f5f8", up="#12a150", dn="#d9483b", acc="#3b5bdb",
          cls={"Акции": "#4b4fb8", "ОФЗ": "#2f8fbf", "Металлы": "#d4a017", "Кэш": "#9aa5b1"})
 
