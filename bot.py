@@ -2,6 +2,7 @@
 
 `python bot.py serve`  — answers menu buttons, sends price alerts and the 9:00/22:00 reports (runs for ~5h50m).
 `python bot.py report` — sends one report with charts.
+The "📱 Живой дашборд" button sends an HTML widget (Bot API 10.4) that refreshes in place.
 Only the owner's chat (TG_CHAT_ID) gets answers; everyone else is ignored.
 """
 import datetime as dt, io, json, os, sys, time, urllib.parse, urllib.request
@@ -12,7 +13,7 @@ MSK = dt.timezone(dt.timedelta(hours=3))
 P = json.load(open("portfolio.json", encoding="utf-8"))
 STATE_FILE = "state/state.json"
 TOKEN, OWNER = os.environ["TG_TOKEN"], str(os.environ["TG_CHAT_ID"])
-MENU = {"keyboard": [["📊 Отчёт", "🖼 Дашборд"], ["🏆 Лидеры дня", "💼 Позиции"], ["💰 Выплаты", "🎯 Цели"], ["🔔 Уведомления"]],
+MENU = {"keyboard": [["📊 Отчёт", "🖼 Дашборд"], ["📱 Живой дашборд"], ["🏆 Лидеры дня", "💼 Позиции"], ["💰 Выплаты", "🎯 Цели"], ["🔔 Уведомления"]],
         "resize_keyboard": True, "is_persistent": True}
 
 
@@ -385,6 +386,65 @@ def dashboard(q, met, total, day, history):
     return buf.getvalue()
 
 
+# ---------- live widget (Bot API 10.4) ----------
+# The HTML is a generic template with no portfolio data in it (the repo is public).
+# Numbers travel only in chat_data of the owner's private message (max 1024 bytes, protected content).
+
+WIDGET_HTML = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "widget.html"), encoding="utf-8").read()
+
+
+def widget_data(q, met, total, day):
+    rows = sorted(q.values(), key=lambda x: (x["bond"], -x["value"]))
+    pr = [x for x in q.values() if x.get("pnl") is not None]
+    d = {"t": dt.datetime.now(MSK).strftime("%d.%m %H:%M"), "v": round(total), "d": round(day),
+         "p": round(sum(x["pnl"] for x in pr)), "c": round(P["cash"]),
+         "a": [round(sum(x["value"] for x in q.values() if not x["bond"])), round(sum(x["value"] for x in q.values() if x["bond"])),
+               round(met), round(P["cash"])],
+         "s": [[(x["name"][4:] if x["bond"] else x["name"])[:9], round(x["value"]), round(x["ch"], 1),
+                None if x.get("pnl_pct") is None else round(x["pnl_pct"], 1), int(x["bond"])] for x in rows]}
+    s = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
+    while len(s.encode()) > 1024 and d["s"]:
+        d["s"].pop()  # smallest bond rows go first if ever over the limit
+        s = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
+    return s
+
+
+def send_widget():
+    q, met, total, day = totals()
+    r = api("sendWidget", chat_id=OWNER, html=WIDGET_HTML, chat_data=widget_data(q, met, total, day), allow_queries="true",
+            protect_content="true", height=600)
+    S["widget"] = {"id": r["result"]["message_id"], "at": time.time()}
+    save_state(S)
+
+
+def refresh_widget():
+    w = S.get("widget")
+    if not w:
+        return
+    q, met, total, day = totals()
+    api("editMessageWidgetData", chat_id=OWNER, message_id=w["id"], chat_data=widget_data(q, met, total, day))
+    w["at"] = time.time()
+
+
+def widget_query(wq):
+    ok = str(wq.get("from", {}).get("id")) == OWNER and str((wq.get("chat") or {}).get("id")) == OWNER
+    ok = ok and wq.get("data") == "r" and (wq.get("message_id") == (S.get("widget") or {}).get("id"))
+    if ok and time.time() - S.get("widget", {}).get("at", 0) > 20:  # at most one price refresh per 20 s
+        try:
+            refresh_widget()
+        except Exception as e:
+            print("widget refresh failed:", type(e).__name__)
+    api("answerWidgetQuery", widget_query_id=wq["id"])
+
+
+def live_dashboard():
+    try:
+        send_widget()
+    except Exception as e:
+        print("widget failed:", safe(e))
+        report()  # fall back to the picture
+
+
 # ---------- screens ----------
 
 def report(with_chart=True, record=False):
@@ -472,11 +532,13 @@ def notify_menu(edit_id=None):
     send(text, reply_markup=kb)
 
 
-ROUTES = {"📊 Отчёт": lambda: report(with_chart=False), "🖼 Дашборд": report, "🖼 Диаграммы": report, "🏆 Лидеры дня": leaders, "💼 Позиции": positions,
+ROUTES = {"📊 Отчёт": lambda: report(with_chart=False), "🖼 Дашборд": report, "🖼 Диаграммы": report, "🏆 Лидеры дня": leaders, "📱 Живой дашборд": live_dashboard, "💼 Позиции": positions,
           "💰 Выплаты": payouts, "🎯 Цели": targets, "🔔 Уведомления": notify_menu}
 
 
 def handle(u):
+    if "widget_query" in u:
+        return widget_query(u["widget_query"])
     msg = u.get("message") or (u.get("callback_query") or {}).get("message") or {}
     chat = msg.get("chat", {})
     if str(chat.get("id")) != OWNER or chat.get("type") != "private":
@@ -541,6 +603,10 @@ def tick():
     if weekday and 10 <= now.hour < 19 and S.get("alert_slot") != slot:
         S["alert_slot"] = slot
         alerts()
+        try:
+            refresh_widget()  # keep the live dashboard current every 15 min during trading hours
+        except Exception as e:
+            print("widget refresh failed:", type(e).__name__)
     save_state(S)
 
 
@@ -554,7 +620,7 @@ def serve(limit_s):
         except Exception as e:
             print("tick failed:", type(e).__name__)
         try:
-            res = api("getUpdates", _t=70, offset=offset or 0, timeout=50, allowed_updates=["message", "callback_query"])
+            res = api("getUpdates", _t=70, offset=offset or 0, timeout=50, allowed_updates=["message", "callback_query", "widget_query"])
         except Exception as e:
             print("poll failed:", type(e).__name__)
             time.sleep(5)

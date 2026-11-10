@@ -1,0 +1,72 @@
+<style>
+*{box-sizing:border-box;margin:0}
+body{font:13px -apple-system,system-ui,sans-serif;color:#1f2430;background:#fff}
+.dk{color:#eef0f4;background:#17191f}
+#w{padding:10px 12px}
+.hd{display:flex;justify-content:space-between;align-items:baseline}
+.tt{font-size:11px;color:#7a8394}
+.big{font-size:24px;font-weight:700;margin:2px 0}
+.up{color:#12a150}.dn{color:#d9483b}.mu{color:#7a8394}
+.tabs{display:flex;gap:4px;margin:8px 0;background:#f0f1f5;border-radius:9px;padding:3px}
+.dk .tabs{background:#262a33}
+.tb{flex:1;text-align:center;padding:5px 0;border-radius:7px;font-size:12px;color:#7a8394}
+.tb.on{background:#fff;color:#1f2430;font-weight:600}
+.dk .tb.on{background:#3a3f4b;color:#eef0f4}
+.g2{display:flex;gap:6px;margin-top:6px}
+.k{flex:1;background:#f4f5f8;border-radius:10px;padding:7px 9px}
+.dk .k{background:#22252d}
+.k b{display:block;font-size:15px;margin-top:2px}
+.bar{display:flex;height:12px;border-radius:6px;margin:10px 0 6px}
+.bar div{height:12px}
+.lg{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}
+.r{display:flex;justify-content:space-between;padding:1px 0;line-height:15px;border-bottom:1px solid #eceef2;font-size:11.5px}
+.dk .r{border-color:#2a2e38}
+.r span{width:22%;text-align:right}.r span:first-child{width:34%;text-align:left}
+.h3{font-weight:700;margin:10px 0 4px}
+.tr{margin:8px 0}
+.tk{position:relative;height:10px;background:#eceef2;border-radius:5px;margin-top:3px}
+.dk .tk{background:#2a2e38}
+.tk i{position:absolute;top:0;height:10px;border-radius:5px}
+.btn{margin-top:10px;text-align:center;padding:7px;border-radius:9px;background:#3b5bdb;color:#fff;font-weight:600}
+.ft{font-size:10px;color:#7a8394;margin-top:6px;text-align:center}
+</style>
+<div id="w"></div>
+<script>
+var W=window.TelegramWidget,D=null,T=0,L=0,COL=['#4b4fb8','#2f8fbf','#d4a017','#9aa5b1'],NM=['Акции','ОФЗ','Металлы','Кэш'],GO=[[60,75],[10,15],[10,20],[0,5]];
+function rb(x){return Math.round(x).toLocaleString('ru-RU').replace(/,/g,' ')+' ₽'}
+function sr(x){return(x<0?'−':'+')+rb(Math.abs(x))}
+function pc(x){return(x<0?'−':'+')+Math.abs(x).toFixed(1).replace('.',',')+'%'}
+function el(t,c,s){var e=document.createElement(t);if(c)e.className=c;if(s!=null)e.textContent=s;return e}
+function cl(x){return x>0?'up':x<0?'dn':'mu'}
+function tap(e,f){var last=0;function h(){var n=Date.now();if(n-last<400)return;last=n;f()}e.addEventListener('click',h);e.addEventListener('pointerup',h)}
+function load(){try{D=JSON.parse(W&&W.chatData||'null')}catch(e){D=null}}
+function render(){
+var w=document.getElementById('w');while(w.firstChild)w.removeChild(w.firstChild);
+document.body.className=W&&W.colorScheme=='dark'?'dk':'';
+if(!D){w.appendChild(el('div','mu','Нет данных. Нажми «📱 Живой дашборд» в меню.'));return}
+var hd=el('div','hd');hd.appendChild(el('div','tt','Портфель'));hd.appendChild(el('div','tt',D.t));w.appendChild(hd);
+w.appendChild(el('div','big',rb(D.v)));
+var s=el('div',cl(D.d),sr(D.d)+' за день');w.appendChild(s);
+var tabs=el('div','tabs');['Итог','Позиции','Доли'].forEach(function(n,i){var b=el('div','tb'+(i==T?' on':''),n);tap(b,function(){T=i;render()});tabs.appendChild(b)});w.appendChild(tabs);
+var sum=D.a.reduce(function(p,c){return p+c},0)||1;
+if(T==0){
+var g=el('div','g2');[['С покупки',sr(D.p),cl(D.p)],['Кэш',rb(D.c),'']].forEach(function(k){var b=el('div','k');b.appendChild(el('span','tt',k[0]));b.appendChild(el('b',k[2],k[1]));g.appendChild(b)});w.appendChild(g);
+var bar=el('div','bar');D.a.forEach(function(v,i){var d=el('div');d.style.width=(v/sum*100)+'%';d.style.background=COL[i];if(i==0)d.style.borderRadius='6px 0 0 6px';if(i==3)d.style.borderRadius='0 6px 6px 0';bar.appendChild(d)});w.appendChild(bar);
+var lg=el('div','lg');D.a.forEach(function(v,i){var x=el('span');var dt=el('span','dot');dt.style.background=COL[i];x.appendChild(dt);x.appendChild(document.createTextNode(NM[i]+' '+Math.round(v/sum*100)+'%'));lg.appendChild(x)});w.appendChild(lg);
+var st=D.s.filter(function(r){return r[4]==0}).slice().sort(function(a,b){return b[2]-a[2]});
+w.appendChild(el('div','h3','Акции за день'));
+st.slice(0,3).concat(st.slice(-3)).forEach(function(r){var x=el('div','r');x.appendChild(el('span','',r[0]));x.appendChild(el('span','mu',rb(r[1])));x.appendChild(el('span',cl(r[2]),pc(r[2])));w.appendChild(x)});
+}else if(T==1){
+var h=el('div','r mu');['Бумага','Сумма','День','С покупки'].forEach(function(n){h.appendChild(el('span','',n))});w.appendChild(h);
+D.s.forEach(function(r){var x=el('div','r');x.appendChild(el('span','',r[0]));x.appendChild(el('span','',rb(r[1])));x.appendChild(el('span',cl(r[2]),pc(r[2])));x.appendChild(el('span',cl(r[3]),r[3]==null?'—':pc(r[3])));w.appendChild(x)});
+}else{
+D.a.slice(0,3).forEach(function(v,i){var p=v/sum*100,t=el('div','tr'),hh=el('div','hd');hh.appendChild(el('b','',NM[i]));var ok=p>=GO[i][0]&&p<=GO[i][1];hh.appendChild(el('span',ok?'':'dn',Math.round(p)+'% · цель '+GO[i][0]+'–'+GO[i][1]+'%'));t.appendChild(hh);var tk=el('div','tk'),z=el('i');z.style.left=GO[i][0]+'%';z.style.width=(GO[i][1]-GO[i][0])+'%';z.style.background='#12a15040';tk.appendChild(z);var f=el('i');f.style.left='0';f.style.width=Math.min(p,100)+'%';f.style.background=COL[i];f.style.height='6px';f.style.top='2px';tk.appendChild(f);t.appendChild(tk);w.appendChild(t)});
+w.appendChild(el('div','tt','ОФЗ выше цели — так задумано: курс на купонный доход.'));
+}
+var b=el('div','btn',L?'Обновляю…':'🔄 Обновить цены');tap(b,function(){if(L||!W)return;L=1;render();W.request('r').then(function(){L=0;render()},function(){L=0;render()})});w.appendChild(b);
+w.appendChild(el('div','ft','Не инвестиционная рекомендация'));
+}
+load();render();
+if(W){W.onEvent('chatDataChanged',function(){load();render()});W.onEvent('themeChanged',render);W.ready&&W.ready()}
+</script>
