@@ -394,25 +394,49 @@ WIDGET_HTML = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "wid
 
 
 def widget_data(q, met, total, day):
+    """Compact JSON for the widget, at most 1024 bytes."""
+    today = dt.datetime.now(MSK).date()
     rows = sorted(q.values(), key=lambda x: (x["bond"], -x["value"]))
     pr = [x for x in q.values() if x.get("pnl") is not None]
+    months = [0] * 12  # payouts for this month and the next 11
+    try:
+        for d, _, v in upcoming(q):
+            i = (d.year - today.year) * 12 + d.month - today.month
+            if 0 <= i < 12:
+                months[i] += v
+    except Exception:
+        pass
+    hist = [h for h in S.get("history", []) if h[0] != today.isoformat()] + [[today.isoformat(), total]]
     d = {"t": dt.datetime.now(MSK).strftime("%d.%m %H:%M"), "v": round(total), "d": round(day),
          "p": round(sum(x["pnl"] for x in pr)), "c": round(P["cash"]),
          "a": [round(sum(x["value"] for x in q.values() if not x["bond"])), round(sum(x["value"] for x in q.values() if x["bond"])),
                round(met), round(P["cash"])],
          "s": [[(x["name"][4:] if x["bond"] else x["name"])[:9], round(x["value"]), round(x["ch"], 1),
-                None if x.get("pnl_pct") is None else round(x["pnl_pct"], 1), int(x["bond"])] for x in rows]}
-    s = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
+                None if x.get("pnl_pct") is None else round(x["pnl_pct"], 1), int(x["bond"])] for x in rows],
+         "h": [[int(h[0][8:10]) * 100 + int(h[0][5:7]), round(h[1] / 100)] for h in hist[-24:]],
+         "m": [today.month] + [round(v) for v in months]}
+    dump = lambda: json.dumps(d, ensure_ascii=False, separators=(",", ":"))
+    s = dump()
+    while len(s.encode()) > 1024 and len(d["h"]) > 8:
+        d["h"].pop(0)  # shorten the capital history first
+        s = dump()
     while len(s.encode()) > 1024 and d["s"]:
-        d["s"].pop()  # smallest bond rows go first if ever over the limit
-        s = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
+        d["s"].pop()  # then drop the smallest bond rows
+        s = dump()
     return s
+
+
+def widget_caption(total, day):
+    return f"Капитал: <b>{rub(total)}</b>\nЗа день: <b>{srub(day)}</b>"
+
+
+WIDGET_KB = {"inline_keyboard": [[{"text": "🔄 Обновить", "callback_data": "w:r"}, {"text": "📊 Отчёт", "callback_data": "w:rep"}]]}
 
 
 def send_widget():
     q, met, total, day = totals()
-    r = api("sendWidget", chat_id=OWNER, html=WIDGET_HTML, chat_data=widget_data(q, met, total, day), allow_queries="true",
-            protect_content="true", height=600)
+    r = api("sendWidget", chat_id=OWNER, html=WIDGET_HTML, chat_data=widget_data(q, met, total, day),
+            caption=widget_caption(total, day), parse_mode="HTML", protect_content="true", reply_markup=WIDGET_KB)
     S["widget"] = {"id": r["result"]["message_id"], "at": time.time()}
     save_state(S)
 
@@ -424,17 +448,18 @@ def refresh_widget():
     q, met, total, day = totals()
     api("editMessageWidgetData", chat_id=OWNER, message_id=w["id"], chat_data=widget_data(q, met, total, day))
     w["at"] = time.time()
+    try:
+        api("editMessageCaption", chat_id=OWNER, message_id=w["id"], caption=widget_caption(total, day) + f"\n<i>обновлено {dt.datetime.now(MSK):%H:%M}</i>",
+            parse_mode="HTML", reply_markup=WIDGET_KB)
+    except Exception:
+        pass  # caption stays as it was; the numbers inside the widget are already fresh
 
 
-def widget_query(wq):
-    ok = str(wq.get("from", {}).get("id")) == OWNER and str((wq.get("chat") or {}).get("id")) == OWNER
-    ok = ok and wq.get("data") == "r" and (wq.get("message_id") == (S.get("widget") or {}).get("id"))
-    if ok and time.time() - S.get("widget", {}).get("at", 0) > 20:  # at most one price refresh per 20 s
-        try:
-            refresh_widget()
-        except Exception as e:
-            print("widget refresh failed:", type(e).__name__)
-    api("answerWidgetQuery", widget_query_id=wq["id"])
+def widget_refresh_button(msg_id):
+    w = S.get("widget") or {}
+    if msg_id != w.get("id") or time.time() - w.get("at", 0) < 20:  # only the latest widget, at most once per 20 s
+        return
+    refresh_widget()
 
 
 def live_dashboard():
@@ -537,8 +562,6 @@ ROUTES = {"📊 Отчёт": lambda: report(with_chart=False), "🖼 Дашбо�
 
 
 def handle(u):
-    if "widget_query" in u:
-        return widget_query(u["widget_query"])
     msg = u.get("message") or (u.get("callback_query") or {}).get("message") or {}
     chat = msg.get("chat", {})
     if str(chat.get("id")) != OWNER or chat.get("type") != "private":
@@ -547,6 +570,10 @@ def handle(u):
         cq = u["callback_query"]
         api("answerCallbackQuery", callback_query_id=cq["id"])
         d = cq.get("data", "")
+        if d == "w:r":
+            return widget_refresh_button(cq["message"]["message_id"])
+        if d == "w:rep":
+            return report(with_chart=False)
         if d.startswith("pos:"):
             return position(d[4:])
         if d.startswith("n:"):
@@ -620,7 +647,7 @@ def serve(limit_s):
         except Exception as e:
             print("tick failed:", type(e).__name__)
         try:
-            res = api("getUpdates", _t=70, offset=offset or 0, timeout=50, allowed_updates=["message", "callback_query", "widget_query"])
+            res = api("getUpdates", _t=70, offset=offset or 0, timeout=50, allowed_updates=["message", "callback_query"])
         except Exception as e:
             print("poll failed:", type(e).__name__)
             time.sleep(5)
