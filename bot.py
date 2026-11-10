@@ -13,7 +13,7 @@ MSK = dt.timezone(dt.timedelta(hours=3))
 P = json.load(open("portfolio.json", encoding="utf-8"))
 STATE_FILE = "state/state.json"
 TOKEN, OWNER = os.environ["TG_TOKEN"], str(os.environ["TG_CHAT_ID"])
-MENU = {"keyboard": [["📊 Отчёт", "🖼 Дашборд"], ["📱 Живой дашборд"], ["🏆 Лидеры дня", "💼 Позиции"], ["💰 Выплаты", "🎯 Цели"], ["🔔 Уведомления"]],
+MENU = {"keyboard": [["🖼 Дашборд", "📱 Живой дашборд"], ["🔔 Уведомления"]],
         "resize_keyboard": True, "is_persistent": True}
 
 
