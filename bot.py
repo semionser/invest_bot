@@ -398,7 +398,8 @@ WIDGET_HTML = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "wid
 def widget_data(q, met, total, day):
     """Compact JSON for the widget, at most 1024 bytes."""
     today = dt.datetime.now(MSK).date()
-    rows = sorted(q.values(), key=lambda x: (x["bond"], -x["value"]))
+    items = sorted(q.items(), key=lambda kv: (kv[1]["bond"], -kv[1]["value"]))
+    rows = [x for _, x in items]
     pr = [x for x in q.values() if x.get("pnl") is not None]
     months = [0] * 12  # payouts for this month and the next 11
     try:
@@ -426,7 +427,32 @@ def widget_data(q, met, total, day):
     while len(s.encode()) > 1024 and d["s"]:
         d["s"].pop()  # then drop the smallest bond rows
         s = dump()
+    S["widget_keys"] = [k for k, _ in items][:len(d["s"])]  # row index -> security, for chart requests
     return s
+
+
+_CANDLES = {}
+
+
+def price_history(key):
+    """Daily closes for the last ~3 months from MOEX, compact JSON for a widget answer (<= 1024 bytes)."""
+    hit = _CANDLES.get(key)
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]
+    bond = key.startswith("OFZ")
+    m, b, sec = ("bonds", "TQOB", "SU" + key[3:] + "RMFS") if bond else ("shares", "TQBR", key)
+    since = (dt.datetime.now(MSK).date() - dt.timedelta(days=95)).isoformat()
+    url = (f"https://iss.moex.com/iss/engines/stock/markets/{m}/boards/{b}/securities/{sec}/candles.json"
+           f"?interval=24&from={since}&iss.meta=off&candles.columns=close,begin")
+    rows = [r for r in json.loads(get(url))["candles"]["data"] if r[0]]
+    d = {"c": [round(r[0], 2) if bond or r[0] < 100 else round(r[0], 1) for r in rows],
+         "d": [int(r[1][8:10]) * 100 + int(r[1][5:7]) for r in rows]}
+    out = json.dumps(d, separators=(",", ":"))
+    while len(out) > 1024 and len(d["c"]) > 10:
+        d["c"].pop(0); d["d"].pop(0)
+        out = json.dumps(d, separators=(",", ":"))
+    _CANDLES[key] = (time.time(), out)
+    return out
 
 
 def widget_caption(total, day):
@@ -438,7 +464,7 @@ WIDGET_KB = {"inline_keyboard": [[{"text": "🔄 Обновить", "callback_da
 
 def send_widget():
     q, met, total, day = totals()
-    r = api("sendWidget", chat_id=OWNER, html=WIDGET_HTML, chat_data=widget_data(q, met, total, day),
+    r = api("sendWidget", chat_id=OWNER, html=WIDGET_HTML, chat_data=widget_data(q, met, total, day), allow_queries="true",
             caption=widget_caption(total, day), parse_mode="HTML", protect_content="true", reply_markup=WIDGET_KB)
     S["widget"] = {"id": r["result"]["message_id"], "at": time.time()}
     save_state(S)
@@ -456,6 +482,20 @@ def refresh_widget():
             parse_mode="HTML", reply_markup=WIDGET_KB)
     except Exception:
         pass  # caption stays as it was; the numbers inside the widget are already fresh
+
+
+def widget_query(wq):
+    """A tap on a holding asks for its price chart. Only the owner, only the latest widget, only "c<row>"."""
+    w, data = S.get("widget") or {}, wq.get("data", "")
+    ok = str(wq.get("from", {}).get("id")) == OWNER and str((wq.get("chat") or {}).get("id")) == OWNER
+    ok = ok and wq.get("message_id") == w.get("id") and data[:1] == "c" and data[1:].isdigit()
+    keys = S.get("widget_keys", [])
+    if ok and int(data[1:]) < len(keys):
+        try:
+            return api("answerWidgetQuery", widget_query_id=wq["id"], data=price_history(keys[int(data[1:])]))
+        except Exception as e:
+            print("chart query failed:", type(e).__name__)
+    api("answerWidgetQuery", widget_query_id=wq["id"])
 
 
 def widget_refresh_button(msg_id):
@@ -565,6 +605,8 @@ ROUTES = {"📊 Отчёт": lambda: report(with_chart=False), "🖼 Дашбо�
 
 
 def handle(u):
+    if "widget_query" in u:
+        return widget_query(u["widget_query"])
     msg = u.get("message") or (u.get("callback_query") or {}).get("message") or {}
     chat = msg.get("chat", {})
     if str(chat.get("id")) != OWNER or chat.get("type") != "private":
@@ -650,7 +692,7 @@ def serve(limit_s):
         except Exception as e:
             print("tick failed:", type(e).__name__)
         try:
-            res = api("getUpdates", _t=70, offset=offset or 0, timeout=50, allowed_updates=["message", "callback_query"])
+            res = api("getUpdates", _t=70, offset=offset or 0, timeout=50, allowed_updates=["message", "callback_query", "widget_query"])
         except Exception as e:
             print("poll failed:", type(e).__name__)
             time.sleep(5)
